@@ -52,7 +52,6 @@ app.post('/scream', (req, res) =>{
         userHandle: req.body.userHandle,
         createdAt: new Date().toISOString()
     };
-
    db
         .collection('screams')
         .add(newScream)
@@ -66,6 +65,17 @@ app.post('/scream', (req, res) =>{
 
 //signup route
 
+const isEmail = (email) => {
+    const regEx = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+    if(email.match(regEx)) return true;
+    else return false
+}
+
+const isEmpty = (string) => {
+    if(string.trim() === '') return true;
+    else return false;
+}
+
 app.post('/signup', (req, res) => {
 	const newUser = {
 		email: req.body.email,
@@ -73,10 +83,27 @@ app.post('/signup', (req, res) => {
 		confirmPassword: req.body.confirmPassword,
 		handle: req.body.handle,
 	}
+    
+    let errors = {};
 
-	//TODO validate date
-	db.doc(`/user/${newUser.handle}`).get()
-		.then(doc => {
+    if(isEmpty(newUser.email)) {
+        errors.email = 'Email must not be empty'
+    }  else if(!isEmail(newUser.email)){
+        errors.email = 'Must be an valid email address'
+    }
+
+    if(isEmpty(newUser.password)) errors.password = 'Must not be empty'
+    if(newUser.password !== newUser.confirmPassword) errors.confirmPassword = 'Passwords must match'
+    if(isEmpty(newUser.handle)) errors.handle = 'Must not be empty';
+
+    if(Object.keys(errors).length > 0) return res.status(400).json(errors);
+
+    //TODO validate date
+    
+    let token, userId;
+    db.doc(`/user/${newUser.handle}`)
+        .get()
+		.then((doc) => {
 			if(doc.exists){
 				return res.status(400).json({ handle: 'this handle is already taken'})
 			} else {
@@ -85,13 +112,33 @@ app.post('/signup', (req, res) => {
 				.createUserWithEmailAndPassword(newUser.email, newUser.password)
 			}
 		})
-		.then(data => {
+		.then((data) => {
+            userId = data.user.uid
 			return data.user.getIdToken();
 
 		})
-		.then(token => {
-			return res.status(201).json({ token });
-		})
+		.then((idToken) => {
+            token = idToken; 
+            const userCredentials = {
+                handle: newUser.handle,
+                email: newUser.email,
+                createdAt: new Date().toISOString(),
+                userId
+            };
+            return db.doc(`/users/${newUser.handle}`).set(userCredentials);
+        })
+        .then(() => {
+            return res.status(201).json({ token })
+        })
+        .catch((err) => {
+            console.error(err);
+            if(err.code === 'auth/email-already-in-use'){
+                return res.status(400).json({ email: 'Email is already in use'})
+            } else {
+                return res.status(500).json({ error: err.code });
+            }
+            
+        })
 
 });
 
